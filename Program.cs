@@ -15,11 +15,17 @@ namespace room
         public static bool run = true;
         public static int width = 120;
         public static int height = 30;
+        public static World world;
 
         [STAThread]
         static void Main(string[] args)
         {
             Console.CursorVisible = false;
+            world = new World(Program.random);
+            var player = new Mob { Icon = '@', Color = ConsoleColor.White };
+            world.Player = player;
+            world.Width = width;
+            world.Height = height;
 
             var floor = InitFloor(width, height);
             // Paint the floor
@@ -27,24 +33,44 @@ namespace room
             // OK.  Actually generate the floor ;)
             var rooms = new List<SmallRect>();
             GenerateFloor(floor, rooms, 0, 0, null);
+            world.Floor = floor;
 
-            var playerX = 1;
-            var playerY = 1;
+            for (int i=0; i<3; i++)
+            {
+                int x = random.Next(1, width - 1);
+                int y = random.Next(1, height - 1);
+                while (!world.CanWalk(x, y))
+                {
+                    x = random.Next(1, width - 1);
+                    y = random.Next(1, height - 1);
+                }
+
+                world.Mobs.Add(new Mob
+                {
+                    Icon = 'M',
+                    Color = ConsoleColor.Green,
+                    X = x,
+                    Y = y,
+                    HomeX = x,
+                    HomeY = y,
+                    CurrentAI = new Wander()
+                });
+            }
 
             // 30x30 to start.  No border?
             bool dirty = true;
             var toDraw = new CharInfo[width * height];
             //DrawRooms(floor, rooms);
-            playerX = rooms[0].Left;
-            playerY = rooms[0].Top;
+            player.X = rooms[0].Left;
+            player.Y = rooms[0].Top;
 
             while(run)
             {
                 if (Console.KeyAvailable)
                 {
                     var inputKey = Console.ReadKey(true);
-                    int targetX = playerX;
-                    int targetY = playerY;
+                    int targetX = player.X;
+                    int targetY = player.Y;
                     switch (inputKey.Key)
                     {
                         case ConsoleKey.A:
@@ -65,21 +91,35 @@ namespace room
                             break;
                     }
 
-                    if (CanWalk(floor, targetX, targetY))
+                    if (world.CanWalk(targetX, targetY))
                     {
-                        playerX = targetX;
-                        playerY = targetY;
+                        player.X = targetX;
+                        player.Y = targetY;
                     }
                     dirty = true;
                 }
 
+                // Think
+                if (dirty)
+                {
+                    for(int i=0; i<world.Mobs.Count; i++)
+                    {
+                        world.Mobs[i].Think(world);
+                    }
+                }
+                
                 if (dirty)
                 {
                     Array.Copy(floor, toDraw, width * height);
-                    //DrawRooms(toDraw, rooms);
-                    toDraw[playerY * width + playerX].Char.AsciiChar = (byte)'S';
-                    toDraw[playerY * width + playerX].Attributes = 0x2 | 0x8;
-                    DrawFloor(toDraw);
+                    //DrawMobs
+                    for (int i=0;i<world.Mobs.Count;i++)
+                    {
+                        var mob = world.Mobs[i];
+                        SetFloor(toDraw, mob.X, mob.Y, mob.Icon, mob.Color);
+                    }
+
+                    SetFloor(toDraw, player.X, player.Y, player.Icon, player.Color);
+                    PaintFloor(toDraw);
                     dirty = false;
                 }
                 // Room collision
@@ -105,14 +145,7 @@ namespace room
             return floor;
         }
 
-        static bool CanWalk(CharInfo[] floor, int x, int y)
-        {
-            if (floor[y * width + x].Char.AsciiChar != '#')
-                return true;
-            return false;
-        }
-
-        static void DrawFloor(CharInfo[] floor)
+        static void PaintFloor(CharInfo[] floor)
         {
             bool b = WriteConsoleOutput(_drawHandle, floor,
                                       new Coord() { X = 120, Y = 30 },
@@ -123,24 +156,6 @@ namespace room
         private static SafeFileHandle _drawHandle = CreateFile("CONOUT$", 0x40000000, 2, IntPtr.Zero, FileMode.Open, 0, IntPtr.Zero);
         private static SmallRect rect = new SmallRect() { Left = 0, Top = 0, Right = 120, Bottom = 30 };
 
-
-        static void Draw(int x, int y, ConsoleColor bg, ConsoleColor color, string s)
-        {
-            Console.CursorTop = y;
-            Console.CursorLeft = x;
-            Console.BackgroundColor = bg;
-            Console.ForegroundColor = color;
-            Console.Write(s);
-        }
-
-        static void Draw(int x, int y, ConsoleColor bg, ConsoleColor color, char s)
-        {
-            Console.CursorTop = y;
-            Console.CursorLeft = x;
-            Console.BackgroundColor = bg;
-            Console.ForegroundColor = color;
-            Console.Write(s);
-        }
 
         private static int seed = 1;
         private static Random random = new Random(seed);
@@ -283,14 +298,6 @@ namespace room
         {
             FillRectIf(floor, new SmallRect { Left = (short)(room.Left - 1), Top = (short)(room.Top - 1), Bottom = (short)(room.Bottom + 1), Right = (short)(room.Right + 1) }, '#', ConsoleColor.DarkGray, ' ');
             FillRect(floor, room, '.', ConsoleColor.DarkYellow);
-        }
-
-        enum Direction
-        {
-            North = 0,
-            East = 1,
-            South = 2,
-            West = 3
         }
 
         static void SetFloor(CharInfo[] floor, int x, int y, char c, ConsoleColor color)
